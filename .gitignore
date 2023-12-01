@@ -1,0 +1,7 @@
+.idea
+.vscode
+venvg
+__pycache__/
+.DS_Store
+english_50MB.txt
+.ipynb_checkpoints/
