@@ -7,69 +7,83 @@ from bwt import create_burrows_wheeler_transform
 from Fmindex import Fmindex
 from FileReader import FileReader
 from WaveletTree import WaveletTree
+import pandas as pd
 
-def plot(file, pattern):
-    file_reader = FileReader(file)
-    if not file_reader.is_read():
+def read_file(file_path):
+    try:
+        file_reader = FileReader(file_path)
+        if not file_reader.is_read():
+            raise IOError("File reading failed.")
+        return file_reader.get_text() + "$"
+    except Exception as e:
+        print(f"Error reading file: {e}")
         sys.exit()
-    # Find Suffix Array and BWT
-    (bwt, diff_seconds) = create_burrows_wheeler_transform(file_reader.get_text() + "$")
-    fmindex = Fmindex(bwt)
+
+def measure_bwt_memory_usage(bwt):
     tracemalloc.start()
-
-    bwt_chars = [char for char in bwt]
     BWTcurrent, BWTpeak = tracemalloc.get_traced_memory()
-    print("BWT memory peak in MB:", BWTcurrent)
     tracemalloc.stop()
-    blockList = [i for i in range(4,21)]
-    timeList = []
-    spaceList = []
-    WTtimeLIst = []
-    for i in range(4, 21):
-        tracemalloc.start()
-        start0 = time.time_ns()
-        wavelet_tree = WaveletTree(bwt_chars, 2**i)
-        end0 = time.time_ns()
-        WTtimeLIst.append(end0 - start0)
-        print("size of object: ", sys.getsizeof(wavelet_tree))
-        current, peak = tracemalloc.get_traced_memory()
-        peakMB = peak / (1024 * 1024)
-        spaceList.append(peakMB)
+    return BWTpeak / (1024 * 1024)
 
-        tracemalloc.stop()
-        start1 = time.time_ns()
-        fm = fmindex.match(pattern, wavelet_tree, len(bwt_chars))
-        print("Pattern: ", pattern, ": ", fm)
-        end1 = time.time_ns()
-        timeList.append(end1 - start1)
-        print(end1 - start1)
-        del wavelet_tree, current, peakMB, peak, fm, start1, end1, start0, end0
+def create_and_measure_wavelet_tree(bwt, block_size):
+    tracemalloc.start()
+    start_time = time.time_ns()
+    wavelet_tree = WaveletTree([char for char in bwt], block_size)
+    end_time = time.time_ns()
+    creation_time_ns = (end_time - start_time) / 1000000
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    peak_memory_mb = peak / (1024 * 1024)
+    return wavelet_tree, creation_time_ns, peak_memory_mb
 
-    # for idx, item in enumerate(timeList):
-    #     if item == 0:
-    #         blockList.remove(idx + 1)
-    # blockList = [str(i) for i in blockList if timeList[i-1] != 0]    
-    # timeList = [i for i in timeList if i != 0]
-    # blockList = [str(i) for i in blockList]       
+def pattern_matching(fmindex, wavelet_tree, pattern, bwt_length):
+    start_time = time.time_ns()
+    match_count = fmindex.match(pattern, wavelet_tree, bwt_length)
+    end_time = time.time_ns()
+    matching_time = (end_time - start_time) / 1000000
+    return matching_time, match_count
+
+def plot_results(block_sizes, wt_creation_times, space_usages, pattern_matching_times):
     plt.figure(1)
-    plt.scatter([str(i) for i in range(4, 21)], WTtimeLIst)
-    plt.ylabel('Wavelet Tree creation time in ns')
-    plt.xlabel('Size of Blocks in Wavelet Tree(2**i)')
+    plt.scatter(block_sizes, wt_creation_times, color='blue', label='Creation Time')
+    plt.ylabel('Wavelet Tree Creation Time (ms)')
+    plt.xlabel('Block Size')
 
     plt.figure(2)
-    plt.scatter([str(i) for i in range(4, 21)], spaceList)
-    plt.ylabel('Wavelet Tree creation memory usage in MB')
-    plt.xlabel('Size of Blocks in Wavelet Tree(2**i)')
-
+    plt.plot(block_sizes, space_usages, 'o-', color='blue', label='Memory Usage')
+    plt.ylabel('Memory Usage (MB)')
+    plt.xlabel('Block Size')
+                
     plt.figure(3)
-    plt.plot(blockList, timeList)
-    plt.ylabel('Pattern matching runtime in ns')
-    plt.xlabel('Size of Blocks in Wavelet Tree(2**i)')
+    plt.plot(block_sizes, pattern_matching_times, 'o-', color='blue', label='Pattern Matching Time')
+    plt.ylabel('Pattern Matching Time (ms)')
+    plt.xlabel('Block Size')
+
     plt.show()
 
+def main(file, pattern):
+    text = read_file(file)
+    bwt, _ = create_burrows_wheeler_transform(text)
+    fmindex = Fmindex(bwt)
+    peak_memory_usage_bwt = measure_bwt_memory_usage(bwt)
+    print(f"BWT Memory Peak (MB): {peak_memory_usage_bwt}")
 
-plot("./test/small_text.txt", "si")
+    block_sizes = [2 ** i for i in range(1, 10)]
+    wt_creation_times, space_usages, pattern_matching_times = [], [], []
+    data = []
+    for block_size in block_sizes:
+        wavelet_tree, creation_time_ms, peak_memory_mb = create_and_measure_wavelet_tree(bwt, block_size)
+        matching_time, match_count = pattern_matching(fmindex, wavelet_tree, pattern, len(text))
+        wt_creation_times.append(creation_time_ms)
+        space_usages.append(peak_memory_mb)
+        pattern_matching_times.append(matching_time)
+        data.append([block_size, creation_time_ms, peak_memory_mb, matching_time])
+        print(f"Pattern: {pattern}, Count: {match_count}, Time: {matching_time}ms")
 
-# plot("./test/dna.txt", "AAGGA")
-# plot("./test/english.txt", "course")
-# plot("./test/protein_data.txt", "SGAPPPE")
+    df = pd.DataFrame(data, columns=["Block Size", "Creation Time (ms)", "Memory Usage (MB)", "Pattern Matching Time (ms)"])
+    plot_results(block_sizes, wt_creation_times, space_usages, pattern_matching_times)
+    return df
+
+if __name__ == "__main__":
+    df = main("./english.txt", "hurricane")
+    print(df)

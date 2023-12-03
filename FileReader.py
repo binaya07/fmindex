@@ -10,7 +10,7 @@ class FileReader(object):
             print("No filename provided.")
             return
         try:
-            with open(filename, 'r') as f:
+            with open(filename, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:
                     for c in line.strip('\n'):  # This will exclude line breaks
                         self.character.append(c)
